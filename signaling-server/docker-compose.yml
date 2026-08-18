@@ -1,0 +1,38 @@
+services:
+
+  signaling-server:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - signaling_data:/signaling-server/data
+    working_dir: /signaling-server/data
+    expose:
+      - "8080"
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+    depends_on:
+      signaling-server:
+        condition: service_healthy
+
+networks:
+  internal:
+
+volumes:
+  signaling_data:
+  caddy_data:
+  caddy_config:

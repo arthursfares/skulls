@@ -1,0 +1,17 @@
+# Sample Caddyfile for the signaling server.
+#
+# Replace signal.example.com with your real domain. As long as DNS points
+# at this host and ports 80/443 are reachable, Caddy automatically obtains
+# and renews a TLS cert via Let's Encrypt — no extra config needed.
+#
+# reverse_proxy also handles the WebSocket upgrade for /ws automatically;
+# Caddy detects the Connection/Upgrade headers itself.
+
+signal.example.com {
+	reverse_proxy signaling-server:8080
+}
+
+# For local testing without a domain (no TLS), use this instead:
+# :80 {
+# 	reverse_proxy signaling-server:8080
+# }
