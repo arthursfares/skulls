@@ -267,7 +267,7 @@ func (m Model) renderDashboardView() tea.View {
 	}
 
 	if len(m.dashboard.rooms) == 0 && len(m.dashboard.invites) == 0 {
-		b.WriteString(styles.SystemStyle.Render("no rooms yet - press 'n' to create one"))
+		b.WriteString(styles.SystemStyle.Render("no rooms yet"))
 		b.WriteString("\n")
 	} else {
 		b.WriteString(m.dashboard.roomsList.View())
