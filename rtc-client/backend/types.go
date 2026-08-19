@@ -2,6 +2,7 @@ package backend
 
 import (
 	"encoding/json"
+	"image"
 	"sync"
 	"time"
 
@@ -171,6 +172,7 @@ type DisconnectedMsg 		struct{ Reason string }
 type AccountDeletedMsg 		struct{}
 type AudioDevicesMsg 		struct{ Inputs []AudioDeviceOption; Outputs []AudioDeviceOption }
 type RoomMembersMsg 		struct{ Owner string; Members []string; PendingInvites []string }
+type ImageMsg 				struct{ From string; Caption string; Image image.Image } // From == "" means sent by this client
 
 // --------------------------------------
 // synthetic peer
@@ -186,12 +188,13 @@ type syntheticWelcome struct {
 // --------------------------------------
 
 // dataChannelMsg is the wire format sent over each peer's chat data
-// channel. Kind distinguishes a broadcast chat line from a /private one so
-// the receiving end can render it differently, even though both travel over
-// the same channel.
+// channel. Kind distinguishes a broadcast chat line, a /private one, and a
+// /image one so the receiving end can render each differently, even though
+// all three travel over the same channel.
 type dataChannelMsg struct {
-	Kind string `json:"kind"` // "chat" | "private"
-	Text string `json:"text"`
+	Kind  string `json:"kind"` // "chat" | "private" | "image"
+	Text  string `json:"text,omitempty"` // chat/private message text, or the /image caption when Kind == "image"
+	Image string `json:"image,omitempty"` // base64-encoded JPEG bytes, present when Kind == "image"
 }
 
 // --------------------------------------

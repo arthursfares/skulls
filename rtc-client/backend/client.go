@@ -1,7 +1,10 @@
 package backend
 
 import (
+	"bytes"
+	"encoding/base64"
 	"encoding/json"
+	"image"
 	"net/url"
 	"os"
 	"strings"
@@ -146,6 +149,14 @@ func setupDataChannel(dataChannel *webrtc.DataChannel, peerID string) {
 	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		var envelope dataChannelMsg
 		if err := json.Unmarshal(msg.Data, &envelope); err != nil { return }
+		if envelope.Kind == "image" {
+			raw, err := base64.StdEncoding.DecodeString(envelope.Image)
+			if err != nil { return }
+			img, _, err := image.Decode(bytes.NewReader(raw))
+			if err != nil { return }
+			program.Send(ImageMsg{From: peerID, Image: img, Caption: envelope.Text})
+			return
+		}
 		program.Send(ChatMsg{From: peerID, Text: envelope.Text, Private: envelope.Kind == "private"})
 	})
 }
@@ -160,6 +171,21 @@ func BroadcastToAllPeers(text string) {
 		if peer.dataChannel == nil { continue }
 		if peer.dataChannel.ReadyState() != webrtc.DataChannelStateOpen { continue }
 		peer.dataChannel.Send(mustJSON(dataChannelMsg{Kind: "chat", Text: text}))
+	}
+}
+
+// NOTE. BroadcastImageToAllPeers fans a JPEG-encoded image out over every open
+// data channel, base64-encoded so it can travel inside the same JSON envelope
+// as chat text. caption is the optional text sent alongside /image. Mirrors
+// BroadcastToAllPeers's silent-skip behavior for peers whose channel isn't open.
+func BroadcastImageToAllPeers(jpegData []byte, caption string) {
+	peersMutex.Lock()
+	defer peersMutex.Unlock()
+	encoded := base64.StdEncoding.EncodeToString(jpegData)
+	for _, peer := range peers {
+		if peer.dataChannel == nil { continue }
+		if peer.dataChannel.ReadyState() != webrtc.DataChannelStateOpen { continue }
+		peer.dataChannel.Send(mustJSON(dataChannelMsg{Kind: "image", Image: encoded, Text: caption}))
 	}
 }
 

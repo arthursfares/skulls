@@ -282,12 +282,17 @@ func RenderInvitePromptBox(roomName string, inputView string, width int, height 
 }
 
 // NOTE. RenderChatLog renders the chat-facing entries from log ("me"/"peer" plus
-// the /private, /roll, notice and error kinds), for display inside the chat
-// viewport. "system" entries (connection events, mute toggles, peer
+// the /private, /roll, notice, error and image kinds), for display inside the
+// chat viewport. "system" entries (connection events, mute toggles, peer
 // joined/left) are still recorded in the log but not displayed here - but errors
 // (e.g. a failed /play) need to actually be seen, so they're shown same as
 // a notice.
-func RenderChatLog(log []LogEntry) string {
+//
+// images holds each "image" entry's current bubblekitten rendering, indexed by
+// LogEntry.ImageIdx - it's supplied by the caller (which owns the actual
+// bubblekitten.Model instances) rather than carried on LogEntry itself, since a
+// given image's rendering changes over time as its async transmit completes.
+func RenderChatLog(log []LogEntry, images []string) string {
 	var b strings.Builder
 	for _, e := range log {
 		stamp := styles.TimestampStyle.Render(e.At.Format("2006-01-02 15:04") + " ")
@@ -315,6 +320,23 @@ func RenderChatLog(log []LogEntry) string {
 		case "notice", "error":
 			b.WriteString(stamp)
 			b.WriteString(styles.ErrorStyle.Render(e.Text))
+			b.WriteString("\n")
+		case "image":
+			b.WriteString(stamp)
+			style := styles.PeerStyle
+			if e.Text == "me" { style = styles.MeStyle }
+			b.WriteString(style.Render(e.Text + " sent an image:"))
+			b.WriteString("\n")
+			view := ""
+			if e.ImageIdx >= 0 && e.ImageIdx < len(images) { view = images[e.ImageIdx] }
+			switch {
+			case view != "":
+				b.WriteString(view)
+			case e.ImagePlaceholder != "":
+				b.WriteString(styles.SystemStyle.Render(e.ImagePlaceholder))
+			default:
+				b.WriteString(styles.SystemStyle.Render("(loading image...)"))
+			}
 			b.WriteString("\n")
 		}
 	}

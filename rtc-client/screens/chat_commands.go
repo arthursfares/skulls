@@ -18,6 +18,7 @@ const (
 	rollUsage    = "/roll <NdM>"
 	playUsage    = "/play <youtube-url>"
 	stopUsage    = "/stop"
+	imageUsage   = "/image <path or url> [caption]"
 )
 
 var chatCommands map[string]chatCommand
@@ -29,6 +30,7 @@ func init() { // go runtime call init() automatically at package import
 		"roll":    {usage: rollUsage, run: runRollCommand},
 		"play":    {usage: playUsage, run: runPlayCommand},
 		"stop":    {usage: stopUsage, run: runStopCommand},
+		"image":   {usage: imageUsage, run: runImageCommand},
 	}
 }
 
@@ -91,5 +93,16 @@ func runPlayCommand(m Model, args string) (Model, tea.Cmd) {
 // NOTE. runStopCommand stops this client's own active playback, if any.
 func runStopCommand(m Model, args string) (Model, tea.Cmd) {
 	return m, backend.StopCmd()
+}
+
+// NOTE. runImageCommand starts loading a local file or http(s) URL for
+// broadcast, with an optional caption; the actual decode/downscale/send
+// happens off the UI goroutine in backend.LoadImageCmd, which reports back
+// with an ImageMsg (or ErrorMsg on failure).
+func runImageCommand(m Model, args string) (Model, tea.Cmd) {
+	source, caption, _ := strings.Cut(strings.TrimSpace(args), " ")
+	caption = strings.TrimSpace(caption)
+	if source == "" { return m.appendNotice("usage: " + imageUsage), nil }
+	return m.appendNotice("loading image..."), backend.LoadImageCmd(source, caption)
 }
 

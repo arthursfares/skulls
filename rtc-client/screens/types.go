@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
+	bubblekitten "github.com/arthursfares/bubblekitten"
 	"rtc-client/backend"
 	"rtc-client/components"
 )
@@ -34,10 +35,11 @@ type Model struct {
 	outputDeviceList list.Model
 	audioDeviceFocus int
 	// --- metadata ---
-	log      []components.LogEntry
-	quitting bool
-	width    int
-	height   int
+	log                []components.LogEntry
+	quitting           bool
+	width              int
+	height             int
+	imageSupportWarned bool // whether already told the user their terminal can't render /image inline this session
 }
 
 // audioDeviceFocus values - which row of the audio settings view (shared by
@@ -88,12 +90,13 @@ type callModel struct {
 	// --- audio settings (mic/speaker pickers) - takes over the whole screen while open, reusing Model's shared device lists ---
 	audioSettingsOpen bool
 	// --- invite prompt - replaces the peers box while open ---
-	inviteOpen  bool
-	inviteInput textinput.Model
+	inviteOpen  	bool
+	inviteInput 	textinput.Model
 	// --- chat (over webrtc data channel) ---
-	chatInput		textarea.Model
-	chatViewport	viewport.Model
-	viewportReady	bool
+	chatInput     	textarea.Model
+	chatViewport  	viewport.Model
+	viewportReady 	bool
+	chatImages    	[]bubblekitten.Model // images sent/received via /image, indexed by LogEntry.ImageIdx
 }
 
 // chatCommand is one entry in the chat "/" command registry: a usage string

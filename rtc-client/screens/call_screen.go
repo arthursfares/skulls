@@ -13,6 +13,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	bubblekitten "github.com/arthursfares/bubblekitten"
 	"rtc-client/backend"
 	"rtc-client/components"
 	"rtc-client/styles"
@@ -47,7 +48,7 @@ func callFooterKeys(m Model) help.KeyMap {
 }
 
 // NOTE. callFooterArea is whatever occupies the call screen's bottom strip: the
-// ':' command palette while it's open (which doubles as the footer while
+// command palette while it's open (which doubles as the footer while
 // active), the key-hint footer otherwise.
 func (m Model) callFooterArea() string {
 	if m.commandPalette.active { return m.renderCommandPalette(m.width) }
@@ -113,7 +114,7 @@ func (m *Model) resizeChatArea() {
 		m.call.chatViewport.SetWidth(chatViewportWidth)
 		m.call.chatViewport.SetHeight(chatViewportHeight)
 	}
-	m.call.chatViewport.SetContent(components.RenderChatLog(m.log))
+	m.call.chatViewport.SetContent(m.renderChatLog())
 }
 
 // --------------------------------------
@@ -284,7 +285,7 @@ func (m Model) handleCallEnter() (tea.Model, tea.Cmd) {
 	m.log = append(m.log, entry)
 	m.saveHistoryEntry(entry)
 	if m.call.viewportReady {
-		m.call.chatViewport.SetContent(components.RenderChatLog(m.log))
+		m.call.chatViewport.SetContent(m.renderChatLog())
 		m.call.chatViewport.GotoBottom()
 	}
 	m.call.chatInput.Reset()
@@ -295,16 +296,27 @@ func (m Model) saveHistoryEntry(e components.LogEntry) {
 	switch e.Kind {
 	case "me", "peer", "private-in", "private-out", "roll":
 		backend.AppendHistoryEntry(
-			m.historySettings, 
+			m.historySettings,
 			m.username,
 			backend.HistoryEntry{RoomID: m.call.roomID, Kind: e.Kind, Text: e.Text, At: e.At},
 		)
 	}
 }
 
+// NOTE. renderChatLog gathers each active image's current bubblekitten
+// rendering (which changes over time as its async transmit completes) and
+// hands it to components.RenderChatLog alongside the log itself.
+func (m Model) renderChatLog() string {
+	images := make([]string, len(m.call.chatImages))
+	for i := range m.call.chatImages {
+		images[i] = m.call.chatImages[i].View()
+	}
+	return components.RenderChatLog(m.log, images)
+}
+
 func (m *Model) refreshChatLog() {
 	if !m.call.viewportReady { return }
-	m.call.chatViewport.SetContent(components.RenderChatLog(m.log))
+	m.call.chatViewport.SetContent(m.renderChatLog())
 	m.call.chatViewport.GotoBottom()
 }
 
@@ -384,10 +396,90 @@ func (m Model) handleChat(msg backend.ChatMsg) Model {
 	m.log = append(m.log, entry)
 	m.saveHistoryEntry(entry)
 	if m.call.viewportReady {
-		m.call.chatViewport.SetContent(components.RenderChatLog(m.log))
+		m.call.chatViewport.SetContent(m.renderChatLog())
 		m.call.chatViewport.GotoBottom()
 	}
 	return m
+}
+
+// maxImageCols and maxImageRows bound how large a /image render gets in the
+// chat log, in terminal cells - large enough to actually see, small enough
+// that one image doesn't push everything else out of the scrollback.
+const maxImageCols = 48
+const maxImageRows = 24
+
+// NOTE. imageDisplaySize picks a terminal-cell size for an image so it fits
+// the chat viewport's width, preserving the source image's aspect ratio.
+// Terminal cells are roughly twice as tall as they are wide, so rows are
+// scaled by half relative to a naive pixel width/height ratio.
+func imageDisplaySize(viewportWidth, imgW, imgH int) (cols, rows int) {
+	cols = maxImageCols
+	if viewportWidth > 0 && viewportWidth < cols { cols = viewportWidth }
+	if cols < 1 { cols = 1 }
+	if imgW <= 0 { imgW = 1 }
+	if imgH <= 0 { imgH = 1 }
+	rows = int(float64(cols) * float64(imgH) / float64(imgW) * 0.5)
+	if rows < 1 { rows = 1 }
+	if rows > maxImageRows { rows = maxImageRows }
+	return cols, rows
+}
+
+// NOTE. handleImage appends a new chat log entry for an image sent (From ==
+// "") or received (From == peer id) via /image. Terminal support is
+// per-viewer (each client detects its own), so this is where sender and
+// receiver diverge, not backend.LoadImageCmd:
+//
+//   - Kitty-capable: it creates the entry's bubblekitten.Model right away and
+//     returns the commands that kick off its async encode/transmit - View
+//     won't show anything for it until those land back through Update (see
+//     the chatImages dispatch loop there) and flip its Ready() state.
+//   - Not kitty-capable: no point encoding/transmitting bytes the terminal
+//     will never draw, so instead of showing the image, the entry gets a
+//     text placeholder: the caption sent alongside /image, if any, or a
+//     generic notice otherwise. The first time this happens in a session, a
+//     one-off warning is logged too.
+func (m Model) handleImage(msg backend.ImageMsg) (tea.Model, tea.Cmd) {
+	label := "me"
+	if msg.From != "" { label = components.DisplayName(m.call.peerNames, msg.From) }
+
+	img := bubblekitten.New()
+	entry := components.LogEntry{Kind: "image", Text: label, ImageIdx: -1, At: time.Now()}
+
+	if !img.Supported() {
+		if !m.imageSupportWarned {
+			m.imageSupportWarned = true
+			m.log = append(m.log, components.LogEntry{
+				Kind: "error",
+				Text: "this terminal doesn't support the kitty graphics protocol - /image will show a text placeholder instead of displaying inline",
+				At:   time.Now(),
+			})
+		}
+		if msg.Caption != "" {
+			entry.ImagePlaceholder = "(this terminal can't display images inline: " + msg.Caption + ")"
+		} else {
+			entry.ImagePlaceholder = "(this terminal can't display images inline)"
+		}
+		m.log = append(m.log, entry)
+		m.refreshChatLog()
+		return m, nil
+	}
+
+	var cmds []tea.Cmd
+	var c tea.Cmd
+	img, c = img.SetImage(msg.Image)
+	cmds = append(cmds, c)
+	img, c = img.SetAltScreen(true) // every screen in this app renders with AltScreen on
+	cmds = append(cmds, c)
+	b := msg.Image.Bounds()
+	cols, rows := imageDisplaySize(m.call.chatViewport.Width(), b.Dx(), b.Dy())
+	img, c = img.SetSize(cols, rows)
+	cmds = append(cmds, c)
+
+	m.call.chatImages = append(m.call.chatImages, img)
+	entry.ImageIdx = len(m.call.chatImages) - 1
+	m.log = append(m.log, entry)
+	m.refreshChatLog()
+	return m, tea.Batch(cmds...)
 }
 
 // NOTE. handleRoomMembers stores the server's response to a :members request and
@@ -434,8 +526,13 @@ func (m Model) resetToDashboard(entry components.LogEntry) (tea.Model, tea.Cmd) 
 	m.call.inviteInput.SetValue("")
 	m.call.chatInput.Blur()
 	m.call.chatInput.Reset()
+	var closeCmds []tea.Cmd
+	for _, img := range m.call.chatImages {
+		if c := img.Close(); c != nil { closeCmds = append(closeCmds, c) }
+	}
+	m.call.chatImages = nil
 	m.log = append(m.log, entry)
-	return m, backend.FetchRoomsCmd(m.token)
+	return m, tea.Batch(append(closeCmds, backend.FetchRoomsCmd(m.token))...)
 }
 
 // NOTE. renderCallAudioSettingsView takes the call screen over entirely with the

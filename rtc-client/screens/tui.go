@@ -198,6 +198,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case backend.RoomMembersMsg:
 		m = m.handleRoomMembers(msg)
 
+	case backend.ImageMsg:
+		return m.handleImage(msg)
+
 	case backend.PlaybackStartedMsg:
 		m = m.appendNotice("now playing: " + msg.Title)
 
@@ -244,6 +247,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case m.stage == stageCall:
 		m.call.chatInput, cmd = m.call.chatInput.Update(msg)
 	}
+
+	// Every bubblekitten.Model for an image sent/received via /image needs to
+	// see every message: the async encode/AltScreen-sync/transmit-complete
+	// messages driving its own display are unexported types this package
+	// can't switch on, so instead of picking them out, just forward
+	// everything and let each model's own id check discard the rest. 
+	// Ready() flipping means its View() output changed, which the chat 
+	// log needs to pick up.
+	if len(m.call.chatImages) > 0 {
+		imgCmds := make([]tea.Cmd, 0, len(m.call.chatImages)+1)
+		changed := false
+		for i := range m.call.chatImages {
+			before := m.call.chatImages[i].Ready()
+			var imgCmd tea.Cmd
+			m.call.chatImages[i], imgCmd = m.call.chatImages[i].Update(msg)
+			if imgCmd != nil { imgCmds = append(imgCmds, imgCmd) }
+			if m.call.chatImages[i].Ready() != before { changed = true }
+		}
+		if changed { m.refreshChatLog() }
+		if cmd != nil { imgCmds = append(imgCmds, cmd) }
+		if len(imgCmds) > 0 { cmd = tea.Batch(imgCmds...) }
+	}
+
 	return m, cmd
 }
 

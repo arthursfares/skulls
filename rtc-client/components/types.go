@@ -8,9 +8,11 @@ import (
 
 // LogEntry lets the call screen color-code each line by where it came from.
 type LogEntry struct {
-	Kind string 					// system, error, me, peer
-	Text string
-	At   time.Time
+	Kind      string 					// system, error, me, peer, image, ...
+	Text      string 					// for Kind == "image", the sender's display name ("me" for the local user) instead of message text
+	ImageIdx  int    					// for Kind == "image" on a kitty-capable terminal, index into the images slice passed to RenderChatLog; -1 if unused
+	ImagePlaceholder string 			// for Kind == "image" on a terminal that can't render it inline, the text to show instead (the /image caption, or a generic notice)
+	At        time.Time
 }
 
 type PeersBoxData struct {
